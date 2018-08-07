@@ -1,0 +1,1137 @@
+---
+title: "Wine EDA and Prediction of Provinces Using Wine Descriptions"
+output:
+  html_document:
+    number_sections: TRUE
+    toc: TRUE
+    editor_options: 
+      chunk_output_type: console
+---
+
+#Introduction
+My very first Kaggle Kernel! I looked through a variety of kernels for this project for inspiration and was surprised to see that no one really delved into whether there was any taster bias in the wines that were reviewed, so I've done some exploring along those lines in addition to doing some basic EDA. I also decided to use H2O.ai to find out whether we can determine a wine's location based on taster reviews.
+
+#Taking this Dataset with a Grain of Salt
+This was a great dataset to work with. That being said, it represents two month snippets in time and will not accurately represent winery distribution, country/region rankings according to points, or any taster bias we may find here.
+
+Enjoy!
+
+##Load Packages
+
+```{r packages, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+# read in the libraries we're going to use
+library(plyr)
+library(dplyr)
+library(readr)
+library(tidyverse) 
+library(tidytext) 
+library(tm)
+library(DT)
+library(maps)
+library(gapminder)
+library(viridis)
+library(data.table)
+library(reshape)
+library(devtools)
+```
+
+```{r viz libraries, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+#Viz libraries
+library(ggplot2)
+library(RColorBrewer)
+library(wordcloud)
+library(plotly)
+library(ggthemes)
+library(ggridges)
+library(ggpubr)
+```
+
+#Data Load and Cleanup
+
+Let's start! I've decided to use both csv files for this kernel so I'm merging the two together.
+
+```{r create df, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+#Create dataframe
+setwd("C:/Users/Brianna Taylor/Documents/Data Science/Projects/Wine Sommelier Kaggle Project 2018/wine_data/csv")
+
+df <- list.files(pattern="*.csv") %>% 
+  lapply(read_csv) %>%
+  bind_rows
+```
+
+First thing's first, I'm going to identify NA's and figure out what to do with them.
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#Identify NAs
+sapply(df, function(x) sum(is.na(x)))
+```
+
+As we can see, there's a few columns with some NA's we need to deal with. I'm going to remove rows where the country and variety are NA in addition to removing columns that I don't believe are useful for the analysis I'm going to do (twitter handle, designation, region_2). I'm also going to remove duplicate rows based on the description column.
+
+```{r data cleanup, include=FALSE}
+#Remove rows with NA countries and varieties
+df <- df[!is.na(df$country),]
+df <- df[!is.na(df$variety),]
+#Remove columns that will not be useful for analysis: taster_twitter_handle, designation, region2
+df <- df[,-c(4, 9, 11)]
+# Remove duplicated rows based on description
+df <- df[!(duplicated(df$description)), ]
+```
+***
+
+#Adding Wine Type and Creating a Document Term Matrix
+
+As I was looking at this dataset there was one thing I thought was sorely missing - wine type! I'm not a wine expert and couldn't tell you whether Graševina is a red or white grape, or if it's a sparkling or dessert wine. I thought this would be a valuable piece of information to have, so I scraped a [Wikipedia Page that lists all grape varietals by grape color](https://en.wikipedia.org/wiki/List_of_grape_varieties). I was able to scrape this data using [Github user rocheio's wiki-table-scrape code](https://github.com/rocheio/wiki-table-scrape) (this scraper uses Python FYI but is very easy to setup and run with minimal Python knowledge). I also looked up grape varieties that fell into Sparkling, Dessert, Red + White blends, and Rosé. Any varieties that were considered Red or White but also Sparking or Dessert or Rosé I overwrote with the latter.
+
+```{r white varieties, message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+#list of all white wine varieties that apply to this dataset. Split list in two as list seemed to max out after certain number of types entered. You could also create a txt file(s) to read in the below.
+whites="addoraca|aidani|aidini|airen|airén|alarije|albalonga|albana|albanella|albanello|albanello bianco|albaranzeuli bianco|albarello|albarín|albariño|albarola|albillo|aligoté|alionza|altesse|alvarinho|amigne|angevine|ansonica|antão vaz|arbane|arbois|arilla|arinto|arneis|arnsburger|arrufiac|arvesiniadu|asprinio|asprinio bianco|assyrtico|assyrtiko|athiri|aubin blanc|aubin vert|aurore|auxerrois|auxerrois blanc|avesso|azal branco|bacchus|baco blanc|balzac blanc|baratuciat|barbera bianca|bariadorgia|baroque|bayan shirey|beba|besgano bianco|bia blanc|bianca|biancame|bianchetta trevigiana|bianco d\'alessano|biancolella|biancone di portoferraio|biancu gentile|bical|bigolona|blanc|blatterle|boal|bogdanuša|bombino bianco|borba blanca|bosco|bourboulenc|bouvier|breidecker|bronner|brustiano bianco|brustiano faux|bual|bukettraube|burger|cabernet blanc|caíño blanco|camaralet|caprettone|carricante|cascarolo bianco|cassady|catalanesca|catarratto|cayetana|cayuga|cayuga white|cerceal|cercial|cereza|chambourcin|chardonel|chardonnay|chasan|chasselas|chenel|chenin blanc|chinuri|clairette|clairette blanche|claret|claverie|cococciola|coda di pecora|coda di volpe|códega do larinho|colombard|completer|cortese|courbu|crouchen|cserszegi fűszeres|dafni|debina|debit|diamond|dimiat|dinka|doña blanca|donzelinho branco|doradillo|drupeggio|durella|durello|edelzwicker|ehrenbreitsteiner|ehrenfelser|elbling|emir|encruzado|erbaluce|escanyavella|ezerjó|faberrebe|falanghina|favorita|fernão pires|feteasca|fetească albă|feteascǎ regalǎ|fetească regală|fiano|findling|folle blanche|forastera|freisamer|friulano|furmint|gamay blanc gloriod|garganega|garrido fino|gelber muskateller|gelber traminer|gewürztraminer|giró blanc|glera|godello|goldburger|goldriesling|gouais blanc|gouveio|graisse|grasă de cotnari|graševina|grauburgunder|grecanico|grechetto|greco|green hungarian|grenache blanc|grillo|gringet|grk bijeli|gros manseng|gros plant|grüner veltliner|gutenborner|hárslevelü|hárslevelű|hebén|hibernal|hondarrabi zuri|humagne blanche|huxelrebe|incrocio manzoni|incrocio manzoni 1.50|insolia|inzolia|irsai oliver|irsai olivér|jacquère|jaen|jampal|juhfark|juwel|kabar|kangoun|kanzler|kéknyelű|kerner|kinali yapincak|királyleányka|kisi|knipperlé|koshu|kövérszőlő|krstač|la crescent|la crosse|l\'acadie blanc|lagarino bianco|lagorthi|lauzet|len de l\'el|listán de huelva|loin de l\'oeil|loureira|loureiro|luglienga|macabeo|maceratino|madeira blend|madeleine angevine|malagousia|malagouzia|malmsey|malvar|malvasia|malvazija|malvoisie|mantonico|mantonico bianco|manzoni|manzoni bianco|maraština|marawi|maria gomes|marsanne|marzemina bianca|mauzac|melody|melon|melon de bourgogne|merlot blanc|merseguera|meseguera|meslier-saint-françois|minella bianca|misket|misket cherven|molette|mondeuse blanche|montepila|montonico bianco|montù|morava|morillon|morio muscat|morio muskat|moscadello|moscatel de alejandría|moscatel graúdo|moscatel roxo|moscato di noto|moscato giallo|moscato rosa|moschofilero|moscofilero|mtsvane|müller-thurgau|muscadel|muscadelle|muscadet|muscat|muscat blanc à petits grains|muscat d\'eisenstadt|muscat of alexandria|muscat ottonel|muscat rose à petits grains|muscat rouge à petits grains|muskat ottonel|narince|nascetta|nasco|neuburger|neyret|noah|nobling|nosiola|nuragus|ondenc|optima|orangetraube|orléans|ortega|ortrugo|österreichisch-weiß|pallagrello bianco|palomino|pampanuto|paralleda|pardillo|pardina|parellada|pascal blanc|passerina|pearl of csaba|pecorino|pedro giménez|pedro ximénez|perle|petit manseng|petit meslier|petite arvine|petroulianos|peurion|picapoll|picardan|picolit|picpoul|pied de perdrix|pigato|pignoletto|pinela|pinot auxerrois|pinot bianco|pinot blanc|pinot grigio|pinot gris|piquepoul|plavay|plyto|pošip|premsal|prié blanc|prosecco|rabigato|rabo de ovelha|räuschling|ravat blanc|rebula|regner|reichensteiner|retagliado bianco|rèze|rhoditis|ribolla gialla|rieslaner|riesling|rivaner|rkatsiteli|robola|roditis|rolle|romorantin|roscetto|rosenmuskateller|rossese bianco|roter traminer|roter veltliner|rotgipfler|roublot|roupeiro|roussanne|rovello bianco|roviello"
+
+whites2="ryzlink rýnský|sacy|saint-pierre doré|sämling|sarba|sarfeher|sauvignon|sauvignon blanc|sauvignon gris|sauvignon musqué|sauvignon vert|sauvignonasse|savagnin|savagnin rose|savatiano|scheurebe|sémillon|sercial|seyval blanc|sherry|sideritis|siegerrebe|silvaner|siria|smederevka|souvignier gris|st. pepin|steen|sylvaner|symphony|tămâioasă românească|tamarez|tamianka|taminga|tamjanika|tempranillo blanco|terrantez|terret blanc|terret gris|thrapsathiri|timorasso|tocai|tocai friulano|tokaji|tokay|torbato|torontel|torrontés|tourbat|trajadura|traminer|traminette|trebbiano|treixadura|trousseau gris|tsolikouri|turbiana|valvin muscat|vega|veltliner|verdea|verdeca|verdejo|verdelho|verdello|verdesse|verdicchio|verdil|verdiso|verdosilla|verduzzo|verduzzo trevigiano|vermentino|vernaccia|vernaccia di oristano|versoaln|vespaiola|vespaiolo|vidal|vidal blanc|vigiriega|vignoles|vilana|viognier|viosinho|vital|vitovska|viura|vugava|weissburgunder|weldra|welschriesling|white|white blend|würzer|xarel·lo|xarel-lo|xinisteri|xynisteri|zalema|zelen|zéta|zibibbo|zierfandler|žilavka|žilavka|zlahtin|posip"
+```
+
+```{r red varieties, message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+#list of all red wine varieties that apply to this dataset. Split list in two as list seemed to max out.
+reds="abbuoto|abouriou|abrusco|acitana|acolon|adakarası|agh shani|agiorgitiko|aglianico|aglianicone|albaranzeuli nero|albarossa|aleatico|aleksandrouli|alfrocheiro|alfrocheiro preto|alicante|alicante bouschet|alicante ganzin|alvarelhão|ancellotta|aragonês|aragonez|aramon|argaman|argant|arrouya noir|aspiran|aubun|avanà|avarengo|azal tinto|băbească neagră|babić|babosa negro|bachet noir|baco noir|baga|barbarossa|barbaroux|barbera|barbera del sannio|barbera sarda|barsaglina|bastardo|beaunoir|bellone|béquignol noir|black monukka|black muscat|blatina|blauburger|blauburgunder|blauer portugieser|blaufränkisch|bobal|boğazkere|bombino nero|bonamico|bonarda|bonarda piemontese|bonda|bondola|bouchalès|bouteillan noir|bovale|bracciola nera|brachetto|braquet|braucol|brugnola|brun argenté|brun fourca|bubbierasco|busuioacă de bohotin|cabernet|cabernet blend|cabernet dorsa|cabernet franc|cabernet gernischt|cabernet mitos|cabernet moravia|cabernet sauvignon|cabernet-shiraz|caiño tinto|calabrese montenuovo|caladoc|calitor|çalkarası|camaraou noir|canaiolo|canari noir|cannonau|carcajolu|carignan|carineña|cariñena-garnacha|carmenère|carménère|carnelian|casavecchia|cascade|castelão|castets|catanese nero|catawba|centesimino|cesanese|cesanese comune|cesanese d'affile|césar|chancellor|charbono|chatus (wine grape)|chelois|cienna|ciliegiolo|cinsault|cinsaut|clinton|colombana nera|colorino|complexa|cornalin d'aoste|cornifesto|corot noir|corvina|corvinone|couderc noir|counoise|crespiello|criolla grande|croatina|cygne blanc|dameron|de chaunac|delaware|diolinoir|dobričić|dolcetto|domina|dornfelder|douce noir|douce noire grise|drnekuša|dunkelfelder|duras|dureza|durif|ederena|ekigaïna|emperor|enantio|enfariné noir|espadeiro|étraire de la dui|fer|fetească neagră|flora|flot rouge|forcallà|forcallat tinta|fortana|francisa|franconia|frankovka|frappato|freisa|frontenac|früburgunder|frühroter veltliner|fuella|fumin|gaglioppo|gamaret|gamay|gamay beaujolais|gamza|garanoir|garnacha|garnacha blend|garnacha tintorera|garnacha-cabernet|garnacha-cariñena|garnacha-monastrell|garró|girò|gouget noir|graciano|gragnano|grand noir de la calmette|grenache|grignolino|grisa nera|grolleau|groppello|gros verdot|g-s-m|gueuche noir|helfensteiner|heroldrebe|hondarribi beltza|hron|incrocio manzoni 2.14|incrocio manzoni 2.15|isabella|ives noir|jacquez|jaén tinto|joubertin|juan garcía|kadarka|kalecik karası|kallmet|karalahna|karasakiz|kekfrankos|kotsifali|krasnostop zolotovsky|kratosija|kuntra|lacrima|lagrein|lambrusco|landal noir|landot noir|lemberger|léon millot|liatiko|limnio|listán negro|madrasa|magarach ruby|magliocco|magliocco canino|magliocco dolce|malbec|mammolo|mandilaria|manseng noir|mansois|manto negro|maratheftiko|marechal foch|maréchal foch|marechal joffre|marquette|marselan|marzemino|mataro|maturana|mauzac noir|mavro|mavrodafni|mavrud|mazuelo|mencia|mencía|meoru|merille|merlot|milgranet|mission|molinara|monastrell|mondeuse|mondeuse noire|monica|montepulciano|montepulciano d'abruzzo|moreto|moristel|mornen noir|morrastel bouschet|mourisco tinto|mourvèdre|mtevandidi|mujuretuli|mureto|muscardin|muscat bleu|nebbiolo|negoska|negrara|negrette|négrette|negroamaro|nerello|nero d'avola|nero di troia|nielluccio|nielluciu|nocera|noiret|norton|oeillade noire|okuzgozu|öküzgözü|pais|país|pallagrello nero|pamid|papaskarasi|papazkarası|parraleta|pascale di cagliari|pelaverga|peloursin|perricone|persan|petit bouschet|petit rouge|petit verdot|petite sirah|petite verdot|piccola nera|piedirosso|pignolo|pineau d'aunis|pinot meunier|pinot nero|pinot noir|pinot noir précoce|pinotage|pione|plantet|plassa|plavac mali|pollera nera|port|portan|portuguiser|poulsard|prieto picudo|primitivo|prokupac|prugnolo gentile|prunelard|prunesta|pugnitello|raboso|ramisco|rara neagra|rebo|red|red blend|refosco|refosco dal peduncolo rosso|rimava|roesler|romé|romeiko|rondinella|rosette|rossignola|rossola nera|rossolino nero|rotberger|rouge du pays|royalty|ruby cabernet|ruché|ruen|rufete|sagrantino|salvador|san giuseppe nero|sangiovese|saperavi|schiava|schioppettino|schönburger|sciacarello|sciaccerellu"
+
+reds2= "sciascinoso|segalin|ségalin|servanin|severny|seyval noir|shiraz|shiraz-cabernet|sirica|siroka melniska|sjriak|sousao|sousão|souson|sousón|souzao|souzão|spätburgunder|st. george|st. laurent|st. vincent|stanušina crna|sumoll|susac crni|susumaniello|swenson red|syrah|taferielt|tai|tannat|tarrango|tazzelenghe|teinturier|tempranillo|téoulier|teran|termarina rossa|teroldego|terrano|terret noir|tibouren|tinta amarela|tinta barroca|tinta cao|tinta cão|tinta carvalha|tinta de toro|tinta del toro|tinta fina|tinta francisca|tinta madeira|tinta miuda|tinta miúda|tinta negra mole|tinta roriz|tintilia|tinto fino|tinto velasco|tocai rosso|touriga|touriga franca|touriga francesa|touriga nacional|trepat|tressot|trevisana nera|trincadeira|triomphe d'alsace|trollinger|trousseau|tsardana|uva di troia|uva rara|uva tosca|uvalino|valdiguié|valentino nero|vermentino nero|vespolina|vidadillo|vien de nus|vinhão|vitis rotundifolia|vranac|vranec|vuillermin|wildbacher|xinomavro|yapincak|žametovka|zarya severa|zinfandel|zweigelt|bordeaux-style red blend|rhÃ´ne-style red blend|austrian red blend|provence red blend|portuguese red"
+```
+
+```{r other varieties, message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+#Versions of Rosé, Sparkling, Dessert, and Red+White varieties
+rose <- "rosado|rosato|rosé|tavel|white zinfandel"
+sparkling <- "blanquette-de-limoux|brachetto-d'acqui|cava|champagne|champagne-blend|cremant-de loire|franciacorta|lambrusco|moscato-d'asti|portuguese-sparkling|prosecco|sekt|sparkling|sparkling-blend"
+#For those interested, needed to do an exact start/end word match with port since they were overided by 'port'uguese white and red varieties and placed in red/white types.
+dessert <- "banyuls|chenin-blanc|madeira|marsala|^port$|riesling|rutherglen-muscat|sauternes|sherry|tokaji"
+red_and_white <- "azal|meritage|moscatel|moscato|muscadine|muskat|muskateller|pallagrello"
+```
+
+Here I create the 'type' column to add to the dataframe.
+
+```{r create type column in df, message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+#Turn df$variety lowercase to match created values
+df$variety <- tolower(df$variety)
+#Create new column: type, that classifies red, white etc. based on word in string
+df$type = ifelse(grepl(rose,df$variety),"Rosé","Unknown")
+df$type = ifelse(grepl(sparkling,df$variety),"Sparkling",df$type)
+df$type = ifelse(grepl(red_and_white,df$variety),"Red and White",df$type)
+df$type = ifelse(grepl(whites,df$variety),"White",df$type)
+df$type = ifelse(grepl(whites2,df$variety),"White",df$type)
+df$type = ifelse(grepl(reds,df$variety),"Red",df$type)
+df$type = ifelse(grepl(reds2,df$variety),"Red",df$type)
+df$type = ifelse(grepl(dessert,df$variety),"Dessert",df$type)
+```
+
+Below is a snippet of what the dataframe looks like with the new column for wine type. Any rows that didn't end up with a type classification were removed. In this case 27 rows were deleted.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+#Removes remaining unknown types. There are approx. 8 varieties that make up 27 rows of reviews that we are deleting here that are present in our values lists but for foreign character purposes do not compute. 
+df <-df[df$type!= "Unknown", ]
+
+head(df[c(10,12)])
+```
+
+Concerning the description columnn, there are a few things that needed to be done to make it usable for analysis and future modeling. I want to remove any wine varieties and provinces that could be included in the description that would giveaway the wine's location. We want to make sure there's no cheating by our model when we get to predicting. Stopwords were also removed from the descriptions in addition to some custom ones that are non-descriptors. 
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+#Stopwords included here aren't descriptive or give away the variety of wine or region, so we're going to remove these so our predictive models don;t cheat.
+my_custom_stopwords <- c("riesling", "grenache", "spÃ¤tlese", "kabinett", "auslese","pollen", "mosel", "rieslings","lbv", "tawnies", "verdot", "merlot", "sangiovese", "blackskinned","brunello", "dasti", "meritage", "bordeauxstyle", "petit", "malbec", "foaming", "cabernetbased", "mourvÃ¨dre", "cinsault","provence", "rosÃ©s", "tavel", "counoise", "screwcap", "saintevictoire","provenÃ§al", "dosage","champagne", "brut", "champagnes", "nero", "autolytic", "autolysis","roussanne", "grÃ¼ner", "botrytis", "prosecco", "chardonnays", "viognier", "sb", "marsanne", "port", "chapin", "ports", "plump", "german", "struck", "rooty", "zin", "sirah", "cab", "amarone", "asti", "pallagrello", "craze", "dastis", "giorgia", "moscatels", "musico", "passito", "rhÃ´ne", "touriga", "nacional", "salmoncolored", "tibouren", "salmon", "aragonez", "sainttropez", "chÃ¢teau", "reims", "montagne", "maturity", "nonvintage", "bead", "disgorged", "chards", "soave", "friulano", "grillo", "ribolla", "gialla", "fiano", "slick", "already", "valckenberg", "mirabelle","petrichor", "davola", "finegrained", "moscatobased", "semisparkler", "electra", "loazzolo", "semifreddo", "moscatos", "pinkcolored", "desclans", "sumeire", "varois", "negroamaro", "rosado", "aizenprovence", "londe", "tavels", "perlage", "cuvÃ©e", "pommery", "aube", "crÃ©mant", "catarratto", "vermentino", "gris", "veltliner", "marlborough", "rheingau", "beerenauslese", "spry", "sample", "barbaresco", "rais", "offgold","aixenprovence", "carignane", "saignÃ©e", "garrigue", "meunier", "deutz", "blancs", "tagginger", "grigio", "falanghina", "viogniers", "saar", "honed", "barolo", "valpolicella", "elaborate", "castelÃ£o", "mont", "sciaccarellu", "hull", "taittinger", "brutstyle", "franciacorta", "alvarinho", "godello", "verdicchio", "incisive", "sprightly", "laurentperrier", "lanson", "manseng", "chablis", "muscadet", "finely", "reverberates", "lanolin", "albariÃ±o", "meursault", "tokaji","lacy", "bros", "prÃ¼m", "lipsmackingly", "portstyle", "colheita")
+
+#Create list of provinces to remove from description so we don't cheat when doing our predictions
+provinces <- as.vector(df$province)
+provinces <- unique(provinces)
+provinces <- tolower(provinces)
+```
+
+Below I create a corpus and dtm for text analysis that we'll use in our EDA. I created a new column called 'desc' so you can see what the description column looks like with stopwords, provinces and varieties removed. 
+
+```{r message=FALSE, warning=FALSE}
+#Create corpus, remove stopwords and giveaway words in description (wine types, provinces).
+corpus <- Corpus(VectorSource(df$description))
+corpus <- tm_map(corpus, content_transformer(tolower))
+corpus <- tm_map(corpus, removeNumbers)
+corpus <- tm_map(corpus, removePunctuation)
+corpus <- tm_map(corpus, removeWords, stopwords("english"))
+corpus <- tm_map(corpus, removeWords, my_custom_stopwords)
+corpus <- tm_map(corpus, removeWords, provinces)
+corpus <- tm_map(corpus, removeWords, whites)
+corpus <- tm_map(corpus, removeWords, whites2)
+corpus <- tm_map(corpus, removeWords, reds)
+corpus <- tm_map(corpus, removeWords, reds2)
+corpus <- tm_map(corpus, removeWords, dessert)
+corpus <- tm_map(corpus, removeWords, sparkling)
+corpus <- tm_map(corpus, removeWords, rose)
+
+# tokenize the corpus
+corpusTokenized <- lapply(corpus, scan_tokenizer)
+
+# concatenate tokens by document, create data frame
+cleaned_reviews <- data.frame(text = sapply(corpusTokenized, paste, collapse = " "), stringsAsFactors = FALSE)
+
+#Join created dataframe to df to show comparison to df$description
+df$desc <- cleaned_reviews$text
+
+#Create dtm
+dtm <- DocumentTermMatrix(corpus)
+
+#Remove sparse terms
+dtm <- removeSparseTerms(dtm, 0.97)
+```
+***
+
+#Exploratory Data Analysis
+
+##Wine Type, Variety, and Flavors
+
+***
+
+### Wine Breakdown by Type
+```{r}
+#count number of wine reviews by wine type and show percentage
+type_counts <- count(df, type)
+type_counts$percent <- (type_counts$n / sum(type_counts$n)) * 100
+type_counts$percent <- round(type_counts$percent, digits = 2)
+knitr::kable(type_counts[ order(-type_counts$n), ])
+```
+
+```{r, out.width = "100%"}
+#Plot type breakdown
+ggplot(data=type_counts, aes(x=type, y=n)) +
+  geom_bar(stat="identity", fill="steelblue")+
+  geom_text(aes(label=percent), vjust=-0.5, color="black", size=3.5)+
+  theme_economist() +
+  scale_x_discrete(limits=c("Red", "White", "Dessert", "Sparkling", "Rosé", "Red and White")) + 
+  ggtitle("Count and Percentage of Wines by Type")
+```
+
+### Wine Breakdown by Variety
+```{r}
+#Count of varieties and percentage of dataset make-up
+variety_counts <- count(df, variety)
+variety_counts$percent <- (variety_counts$n / sum(variety_counts$n)) * 100
+knitr::kable(head(variety_counts[ order(-variety_counts$n), ]))
+```
+
+### Flavor Profiles and Complexity
+
+You'll often hear that wine has 'notes'. I thought it would be worth digging into and representing flavor profiles of wines. Using [Wine Folly's Flavor Chart](https://winefolly.com/tutorial/introducing-the-wine-flavor-chart/) I have done something similar to what I did when creating the 'type' column, and grouped words that fall into a flavor category together. I've left out some categories such as 'noble rot' because I'm assuming many people aren't familiar with the taste and/or smell of cat pee or beeswax. Flavor categories could be made far more complex and complete, but since I'm not sure what else should be added to categories like 'earthy' or 'microbial' I've decided to keep things simple. Below you will find a filterable table that shows you not only the profiles a wine has, but a count of how many profiles a wine falls under, which I've titled flavor complexity. 
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+#Create a new df to focus on flavor profiles of wine based on words in the desc
+recommenderdf <- df[,c("title", "winery", "country", "region_1", "variety", "type", "price", "points", "taster_name", "desc")]
+
+#Pulled from wine folly, these are common flavor categories. Left out categories like 'noble rot' among others because, let's face it, the majority of us can't identify flavors like beeswax and cat pee...
+floral <- "iris|peony|elderflower|acacia|lilac|jasmine|honeysuckle|violet|lavender|rose|potpourri|hibiscus|floral"
+citrus <- "lime|lemon|grapefruit|orange|marmalade|citrus"
+treeFruit <- "quince|apple|pear|nectarine|peach|apricot|persimmon"
+tropicalFruit <- "pineapple|mango|guava|kiwi|lychee|tropical"
+redFruit <- "cranberry|pomegranate|cherry|strawberry|raspberry"
+blackFruit <- "boysenberry|currant|plum|blackberry|blueberry|olive"
+spice <- "pepper|cinnamon|anise|fennel|eucayptus|mint|thyme|sage|spice"
+earthy <- "petroleum|volcanic|beet|soil|gravel|slate|clay|earth|earthy"
+oak <- "dill|smoke|cigar|baking|coconut|vanilla|^oak$"
+aged <- "leather|cocoa|coffee|tabacco|nuts"
+microbial <- "mushroom|truffle|lager|sourdough|cream|butter"
+
+#Creating new columns for each flavor category
+recommenderdf$floral = ifelse(grepl(floral,df$desc),"Floral, ", "")
+recommenderdf$citrus = ifelse(grepl(citrus,df$desc),"Citrus, ", "")
+recommenderdf$tropicalFruit = ifelse(grepl(tropicalFruit,df$desc),"Tropical Fruit(s), ", "")
+recommenderdf$redFruit = ifelse(grepl(redFruit,df$desc),"Red Fruit(s), ", "")
+recommenderdf$blackFruit = ifelse(grepl(blackFruit,df$desc),"Black Fruit(s), ", "")
+recommenderdf$spice = ifelse(grepl(spice,df$desc),"Spice(s), ", "")
+recommenderdf$earthy = ifelse(grepl(earthy,df$desc),"Earthy, ", "")
+recommenderdf$oak = ifelse(grepl(oak,df$desc),"Oak Aging, ", "")
+recommenderdf$aged = ifelse(grepl(aged,df$desc),"Aging Flavors, ", "")
+recommenderdf$microbial = ifelse(grepl(microbial,df$desc),"Microbials, ", "")
+
+#Combine flavor columns into a single column
+recommenderdf$flavorProfile <- with(recommenderdf, paste0(floral, citrus, tropicalFruit, redFruit, blackFruit, spice, earthy, oak, aged, microbial))
+
+#Remove comma and space at the end of the flavorProfile string
+recommenderdf$flavorProfile <- gsub('.{2}$', '', recommenderdf$flavorProfile)
+
+#Remove rows with empty flavorProfile data
+recommenderdf <- subset(recommenderdf, flavorProfile!="")
+
+#Count number of flavor profiles and create new column with result
+recommenderdf$flavorComplexity <- count.fields(textConnection(recommenderdf$flavorProfile), sep = ",")
+
+#Delete flavor columns
+recommenderdf$floral <- NULL
+recommenderdf$citrus <- NULL
+recommenderdf$tropicalFruit <- NULL
+recommenderdf$redFruit <- NULL
+recommenderdf$blackFruit <- NULL
+recommenderdf$spice <- NULL
+recommenderdf$earthy <- NULL
+recommenderdf$oak <- NULL
+recommenderdf$aged <- NULL
+recommenderdf$microbial <- NULL
+
+#Datatable showing flavor profile and complexity of wines
+datatable(subset(recommenderdf[c(1:3,5:8,10:12)]), caption = 'Flavor Profiles and Complexity (count of flavor profiles) in Wines', filter = 'top', style = 'bootstrap')
+```
+
+### Correlation Between Points and Flavor Complexity
+
+Below we find that there is a very weak, positive relationship between points and flavor complexity. We could perhaps argue that complex wines with lots of flavors may not result in them rising to the top.
+
+```{r}
+# Correlation between points given and flavor complexity
+cor.test(recommenderdf$points, recommenderdf$flavorComplexity, method=c("pearson"))
+```
+
+```{r, out.width = "100%"}
+#Visualize Correlation 
+ggplot(recommenderdf, aes(factor(flavorComplexity), points)) +
+  geom_violin(aes(fill = flavorComplexity), trim = FALSE, draw_quantiles = c(0.25, 0.5, 0.75)) + theme(plot.subtitle = element_text(vjust = 1), 
+    plot.caption = element_text(vjust = 1)) +labs(x = "Flavor Complexity", y = "Points") + theme_economist() + theme(legend.position="none") + 
+  ggtitle("A Look at Flavor Complexity and Points")
+```
+
+While we noted the relationship was very weak between the two variables, it is interesting to see that as complexity increases, the more bulbous the collection of wines becomes in the chart by group. While wines with flavor complexities of 8 have a better chance of getting at least 83 points compared to simple single profile wines, they also appear less likely break the 95 point barrier. It almost looks like 7 is a lucky number. 
+
+### Correlation between Variety and Flavor Complexity
+
+```{r}
+# Correlation between variety and flavor complexity
+recommenderdf$varietynum <- as.numeric(as.factor(recommenderdf$variety))
+cor.test(recommenderdf$varietynum, recommenderdf$flavorComplexity, method=c("pearson"))
+```
+
+Again, we see an incredibly weak relationship here. You would think that certain wines would have a particular range of flavor complexities but when you have 600+ varieties in the dataset this result is not that surprising. 
+
+##To The Cloud - Most Frequent Terms in Reviews
+
+```{r, out.width = "100%", message=FALSE, warning=FALSE}
+#Most frequent terms using dtm
+freq = data.frame(sort(colSums(as.matrix(dtm)), decreasing=TRUE))
+wordcloud(rownames(freq), freq[,1], max.words=50, colors=brewer.pal(1, "Dark2"))
+```
+
+'Wine' and 'flavors' are take the cake, but it is nice to see a lot of useful descriptors in this cloud such as oak, plum, cherry etc.
+
+##Most Important Terms based on TF-IDF
+
+TF-IDF reflects how important/relevant a word is. The value increases/decreases in proportion to the number of times a word appears in the document and is offset by the frequency of the term in the corpus. Below is another wordcloud showcasing the words with the highest TF-IDF scores. I've created a TD-IDF DTM below to use for some analysis.
+
+```{r, out.width = "100%", message=FALSE, warning=FALSE}
+#TF-IDF - inverse term frequency
+dtm_tfidf <- DocumentTermMatrix(corpus, control = list(weighting = weightTfIdf))
+dtm_tfidf = removeSparseTerms(dtm_tfidf, 0.95)
+
+freq = data.frame(sort(colSums(as.matrix(dtm_tfidf)), decreasing=TRUE))
+wordcloud(rownames(freq), freq[,1], max.words=100, colors=brewer.pal(1, "Dark2"))
+```
+
+Note that we have a lot of fruits in the cloud as well as descriptors such as 'crisp', 'rich' and 'ripe'. Some words we saw in the previous word cloud also come up again, so we have a nice mix here.
+
+### Flavor Associations
+
+We can find out flavor association strengths for any word we can think of that lives in our TF-IDF DTM. Here's a few examples.
+
+```{r}
+#Find associated terms for raspberry with a relationship strength of at least 0.05
+findAssocs(dtm_tfidf, "raspberry", 0.05)
+```
+
+```{r}
+findAssocs(dtm_tfidf, "lemon", 0.05)
+```
+
+Going back to a descriptor found in our word cloud, it appears that rich wines would also be classified as full and smooth.
+
+```{r}
+findAssocs(dtm_tfidf, "rich", 0.05)
+```
+
+## TF-IDF by Topic
+
+Below is a function I found on [Kaggle's learn track for Machine Learning with R - NLP by Rachael Tatman](https://www.kaggle.com/rtatman/nlp-in-r-topic-modelling). This function allows us find out informative terms by topic from our TF-IDF DTM and plot the results.
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+# This function is from Rachael Tatman's NLP in R: Topic Modelling. Lots to learn about NLP!
+# https://www.kaggle.com/rtatman/nlp-in-r-topic-modelling
+
+top_terms_by_topic_tfidf <- function(text_df, text_column, group_column, plot = T){
+    group_column <- enquo(group_column)
+    text_column <- enquo(text_column)
+    
+    # get the count of each word in each review
+    words <- text_df %>%
+      unnest_tokens(word, !!text_column) %>%
+      count(!!group_column, word) %>% 
+      ungroup()
+
+    # get the number of words per text
+    total_words <- words %>% 
+      group_by(!!group_column) %>% 
+      summarize(total = sum(n))
+
+    # combine the two dataframes we just made
+    words <- left_join(words, total_words)
+
+    # get the tf_idf & order the words by degree of relevence
+    tf_idf <- words %>%
+      bind_tf_idf(word, !!group_column, n) %>%
+      select(-total) %>%
+      arrange(desc(tf_idf)) %>%
+      mutate(word = factor(word, levels = rev(unique(word))))
+    
+    if(plot == T){
+        # convert "group" into a quote of a name
+        # (this is due to funkiness with calling ggplot2
+        # in functions)
+        group_name <- quo_name(group_column)
+        
+        # plot the 10 most informative terms per topic
+        tf_idf %>% 
+          group_by(!!group_column) %>% 
+          top_n(10) %>% 
+          ungroup %>%
+          ggplot(aes(word, tf_idf, fill = as.factor(group_name))) +
+          geom_col(show.legend = FALSE) +
+          labs(x = NULL, y = "tf-idf") +
+          facet_wrap(reformulate(group_name), scales = "free") +
+          coord_flip()
+    }else{
+        # return the entire tf_idf dataframe
+        return(tf_idf)
+    }
+}
+```
+
+### Top TF-IDF Term for Each Wine Type
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+# Top tf-idf word for each wine type. Continued from NLP lesson by Rachael Tatman.
+reviews_tfidf <- top_terms_by_topic_tfidf(text_df = df, 
+                         text_column = desc, 
+                         group = type, 
+                         plot = F)
+
+knitr::kable(head(reviews_tfidf))
+```
+
+### Top 10 TF-IDF Terms for Each Wine Type, Plotted
+
+```{r, out.width = "100%", message=FALSE, warning=FALSE}
+# Create bar chart showing top 10 tf-idf words for each wine type. Nice way to visualize by Rachael Tatman.
+reviews_tfidf  %>% 
+          group_by(type) %>% 
+          top_n(10) %>% 
+          ungroup %>%
+          ggplot(aes(word, tf_idf, fill = type)) +
+          geom_col(show.legend = FALSE) +
+          labs(x = NULL, y = "tf-idf") +
+          facet_wrap(~type, ncol = 3, scales = "free" ) +
+  ggtitle("Top 10 Relevant Terms by Wine Type") +
+          coord_flip() + 
+  theme_economist()
+```
+
+### TF-IDF Filterable Table for White Wines
+
+I wanted to create tables throughtout this project that were searchable so that people who were interested in seeing what characteristics a variety is likely to have based on terms could do so. I've created a table with all the white wine varieties below.
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+#Create subset df for white wines 
+whites_tfidf <- top_terms_by_topic_tfidf(text_df = subset(df, type == "White"), 
+                         text_column = desc, 
+                         group = variety, 
+                         plot = F)
+
+#Most frequent terms for white wines
+whites_tfidf <- whites_tfidf %>%
+  arrange(variety, n)
+
+#Create filterable table showing top tf-idf term for each variety 
+datatable(whites_tfidf, caption = 'Descriptors of White Wines with Word Count and tf-idf Importance', filter = 'top', style = 'bootstrap')
+```
+
+###Top 3 Most Important Terms by State and Wine Type in the US
+
+Because the US has the most wineries by far in this dataset, I thought it would be a fun exercise to see what the top relevant terms are by state. You can get a sense of what kind of varieties do well depending on location thanks to the handy table below.
+
+```{r top 3 terms for usa by state, message=FALSE, warning=FALSE, paged.print=FALSE}
+usa_tfidf <- top_terms_by_topic_tfidf(text_df = subset(df, country == "US"), 
+                                      text_column = desc, 
+                                      group = province, 
+                                      plot = F)
+  
+#Most important terms
+usa_tfidf <- usa_tfidf %>% 
+  group_by(province) %>% 
+  arrange(province, desc(tf_idf)) %>% 
+  top_n(3) %>%
+  filter(!province %in% c("America"))
+
+datatable(usa_tfidf, caption = 'US Top 3 Terms by State', filter = 'top', style = 'bootstrap')
+```
+***
+
+#Taster Bias
+
+##Average Overall Rating by Taster
+
+```{r}
+#Average score given by reviewer, ignoring wine type
+avg_score_review <- group_by(df, taster_name)
+avg_score_review <- summarise(avg_score_review, avgScore = mean(points))
+avg_score_review <- avg_score_review %>%arrange(-avgScore)
+
+datatable(avg_score_review, caption = 'Average Scoring by Taster', filter = 'top', style = 'bootstrap')
+```
+
+There doesn't seem to be much of a range from lowest to highest average score, but perhaps this changes when wine type is considered. 
+
+##Average Rating by Taster and Type
+
+```{r}
+#Average scores by taster and type
+top_scores <- group_by(df, taster_name, type)
+top_scores <- summarise(top_scores, avgScore = mean(points))
+top_scores <- spread(top_scores, type, avgScore)
+datatable(top_scores, caption = 'Average Wine Type Rating by Taster', filter = 'top', style = 'bootstrap')
+```
+
+We can start to see some favoritism here depending on wine type and taster. We should note that some tasters avoid certain wine types altogether.
+
+```{r, out.width = "100%", message=FALSE, warning=FALSE}
+#Average scores by taster and type visualized as boxplot
+top_scores <- group_by(df, taster_name, type)
+top_scores <- summarise(top_scores, avgScore = mean(points))
+top_scores <- top_scores %>% na.omit() 
+
+p <- ggplot(top_scores, aes(type, avgScore)) +
+  geom_boxplot() +
+  geom_jitter(aes(colour = taster_name), width = 0.2) + 
+  labs(colour= "Taster") +
+  theme_economist() +
+  theme(plot.subtitle = element_text(vjust = 1), 
+    plot.caption = element_text(vjust = 1)) +labs(title = "Average Scores by Taster and Type", 
+    x = "Wine Type", y = "Average Score") + theme(legend.key = element_rect(size = 1))
+
+p <- ggplotly(p)
+
+p
+```
+
+This is one of my favorite graphs for this project. You can definitely see that there is some serious preference for some wine types over others. If you were hunting for a nice sparkling wine, you would perhaps want to go with tasters who have reviewed more than a few and have a healthy range of points given out. You could use the graph above and the table below to get an idea of which tasters might hold more weight depending on the wine type you're interested in.
+
+## Number of Reviews by Taster and Wine Type
+
+```{r}
+type_review_count <- df %>%
+  count(type, taster_name) %>%
+  ungroup() %>% 
+  mutate(type=as.character(type),
+         taster_name = as.character(taster_name)) %>%
+  bind_rows(group_by(.,taster_name) %>%
+              summarise(n=sum(n)) %>%
+              mutate(type='Total')) %>%
+  spread(type,n,fill=0) %>%
+  select(-Total,Total) %>%
+  arrange(-Total)
+
+datatable(type_review_count, caption = 'Number of Reviews by Taster and Wine Type', filter = 'top', style = 'bootstrap')
+```
+
+## Top 5 Varieties by Taster
+
+Digging in a bit, we'll take a look at the top 5 wine varieties by taster based on average score.
+
+```{r}
+#Variety favorites by somm
+top_varieties_by_somm <- group_by(df, taster_name, variety, type)
+top_varieties_by_somm <- summarise(top_varieties_by_somm, avgScore = mean(points))
+
+top_varieties_by_somm <- top_varieties_by_somm %>%
+  group_by(taster_name) %>%
+  top_n(n = 5, wt = avgScore)  %>%
+  arrange(taster_name, desc(avgScore))
+
+datatable(top_varieties_by_somm, caption = 'Top 5 Rated Wine Varieties by Taster', filter = 'top', style = 'bootstrap')
+```
+
+### Number of Times A Variety Appears in Top 5 Wine Picks
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+head(
+  top_varieties_by_somm %>%
+  na.omit() %>%
+  group_by(variety) %>%
+  count(variety) %>%
+  arrange(desc(n)), n = 20)
+```
+
+Apparently cabernets are favorites! It's also of the most reviewed wine types so no surprises here. It is interesting that pinot noir appeared only once on the list considering that it is the most popular grape variety in this dataset.
+
+## Number of Times Red Wines Appeared in Top 5 Wine Picks  
+
+```{r}
+#Count of top rated wine types that were Reds
+sum(top_varieties_by_somm$type == 'Red')
+```
+
+## Number of Times White Wines Appeared in Top 5 Wine Picks 
+
+```{r}
+#Count of top rated wine types that were Whites - leaves only 9 other top rated wines that don't fall under Red or White category!
+
+#Top rated reds are more than double in this list than whites.
+sum(top_varieties_by_somm$type == 'White')
+```
+
+Considering that far more red wines were reviewed overall compared to white wines, this is unsurprising. This may indicate that tasters are partial to reds over other types, or more reds are reviewed simply because more reds are sold. What is interesting is that there are far more white wine grape varieties in the world than red, and yet reds are the star. Fun fact: You can actually make white wine from red grapes by simply removing the skin. Roses and Sparkling wines are examples of this, [but for some other examples head here](https://www.winespectator.com/drvinny/show/id/50677).
+
+## Top 3 Favorite Wineries by Taster Based on Average Score
+
+```{r}
+#Some tasters show up more than 3 times because they have given the same score multiple times.
+top_scores_winery <- group_by(df, taster_name, winery, country)
+top_scores_winery <- summarise(top_scores_winery, avgScore = mean(points))
+
+top_scores_winery <- top_scores_winery %>%
+  group_by(taster_name) %>%
+  top_n(n = 3, wt = avgScore)  %>%
+  arrange(taster_name, desc(avgScore))
+
+datatable(top_scores_winery, caption = 'Top 3 Wineries Based on Average Score by Taster', filter = 'top', style = 'bootstrap')
+```
+
+Numerous tasters only reviewed wines from a single country, hence the lack of variety in what countries make a taster's top 5. The table below shows this.
+
+## Top 5 Rated Countries by Taster Average Score
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+#Country favorites by taster
+top_country_by_somm <- group_by(df, taster_name, country)
+top_country_by_somm <- summarise(top_country_by_somm, avgScore = mean(points))
+
+top_country_by_somm <- top_country_by_somm %>%
+  group_by(taster_name) %>%
+  top_n(n = 5, wt = avgScore)  %>%
+  arrange(taster_name, desc(avgScore))
+
+datatable(top_country_by_somm, caption = 'Top 5 Rated Countries by Taster', filter = 'top', style = 'bootstrap')
+```
+
+## Frequency Country Appears in Top 5 Average Rating
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+knitr::kable(
+  top_country_by_somm %>%
+  na.omit() %>%
+  group_by(country) %>%
+  count(country) %>%
+  arrange(desc(n)) %>%
+  top_n(10)
+)
+```
+
+This US is overrepresented in this dataset because so many wines from this country were reviewed. 
+
+## Number of Appearances Wineries Make in Top 3 Taster List
+
+```{r}
+head(
+  top_scores_winery %>%
+  na.omit() %>%
+  group_by(winery) %>%
+  count(winery) %>%
+  arrange(desc(n)) %>%
+  top_n(5), n = 10
+)
+```
+
+Horse Power and King Family (both US) are the only wineries that appear more than once in taster top 5's.
+
+## Number of Reviews by Taster and Winery
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+reviews_by_wineryTaster <- df %>% 
+ group_by(winery, taster_name) %>%
+ summarise(wineryCount = n(), avgScore = mean(points)) %>% 
+ arrange(desc(wineryCount)) %>% 
+ ungroup()
+
+knitr::kable(
+  head(reviews_by_wineryTaster)
+)
+```
+
+Roger Voss is a reviewing machine. That being said, he and others could be skewing the data by reviewing a lot of highly rated wineries from countries they prefer. Let's take a look how the review numbers break down.
+
+##Number of Reviews by Taster and Country
+```{r}
+tasterCountryReviews <- df %>% 
+ group_by(country, taster_name) %>%
+  na.omit() %>%
+ summarise(wineryCount = n(), avgScore = mean(points)) %>% 
+ arrange(desc(wineryCount)) %>% 
+ ungroup()
+
+knitr::kable(tasterCountryReviews)
+```
+
+## Total Number of Reviews by Taster
+
+```{r}
+df %>% 
+  na.omit() %>%
+  group_by(taster_name) %>%
+  summarise(wineryCount = n(), avgScore = mean(points)) %>% 
+  arrange(desc(wineryCount)) %>% 
+  ungroup()
+```
+
+It actually looks like a decent portion of tasters like to review only a few countries. We saw proof of this earlier when we were looking at how average score by taster and country. Let's look at how many tasters reviewed each country.  
+
+#Number of Tasters Who Reviewed Each Country
+
+```{r}
+tasterCountryReviews %>% 
+  group_by(country) %>%
+  summarise(tastersReviewed = n()) %>% 
+  arrange(desc(tastersReviewed)) %>% 
+  ungroup()
+```
+
+Everyone but two of the tasters reviewed wines from the US. Let's look at a couple of taster point distributions to see whether they are only reviewing high quality wines and skewing country scores upwards.
+
+```{r, out.width = "100%",}
+vossSpread <- subset(df, df$taster_name == 'Roger Voss' & df$country =='France') %>% 
+ group_by(points) %>%
+ summarise(wineryCount = n()) %>% 
+ arrange(desc(points)) %>% 
+ ungroup()
+
+ggplot(data=vossSpread, aes(x=points, y=wineryCount)) +
+  geom_bar(stat="identity", fill="steelblue")+
+  geom_text(aes(label=wineryCount), vjust=-0.5, color="black", size=3.5)+
+  ggtitle("Roger Voss - Points Distribution for French Wines Reviewed") +
+  geom_vline(xintercept = mean(vossSpread$points))
+```
+
+```{r, out.width = "100%",}
+kerinSpread <- subset(df, df$taster_name == 'Kerin O’Keefe') %>% 
+ group_by(points) %>%
+ summarise(wineryCount = n()) %>% 
+ arrange(desc(points)) %>% 
+ ungroup()
+
+ggplot(data=kerinSpread, aes(x=points, y=wineryCount)) +
+  geom_bar(stat="identity", fill="steelblue")+
+  geom_text(aes(label=wineryCount), vjust=-0.5, color="black", size=3.5)+
+  ggtitle("Kerin O’Keefe - Points Distribution for Italian Wines") +
+  geom_vline(xintercept = mean(kerinSpread$points))
+```
+
+There appears to be a slight skew towards the number of wineries that fall under 90 points for both Voss and O’Keefe, but otherwise we have a fairly nice distribution of points and wineries reviewed. This shows that, at least for these two reviewers, that while they like to review certain countries, they aren't just giving out 90's to every wine they taste and we would likely turn to them for recommendations on French or Italian wines.
+
+***
+
+# Price
+
+## Price Distribution
+
+```{r}
+#75 percent of wines in this list are $40 and below.
+quantile(df$price, na.rm = TRUE)
+```
+
+As we can see, the majority of wines fall around $40 and below. Who says you need to buy an expensive bottle to get a nice wine?
+
+## Points and Price Relationship By Type for WInes $40 and Under
+
+```{r, message=FALSE, warning=FALSE, paged.print=FALSE}
+#Points distribution by wine type w ggridges
+g1 <- ggplot(df, aes(x = points, y = type, fill = ..x..)) +
+  geom_density_ridges_gradient(scale = 3, rel_min_height = 0.01, quantile_lines=TRUE) +
+  scale_fill_viridis(name = "Points") +
+  labs(title = 'Points Distribution by Wine Type')
+```
+
+```{r}
+#Price Distribution by Wine Type w ggridges
+g2 <- ggplot(subset(df, price <= 40), aes(x = price, y = type, fill = ..x..)) +
+  geom_density_ridges_gradient(scale = 3, rel_min_height = 0.01, quantile_lines=TRUE) +
+  scale_fill_viridis(name = "Price", option='C') +
+  labs(title = 'Price Distribution by Wine Type')
+```
+
+
+```{r, out.width = "100%", message=FALSE, warning=FALSE, paged.print=FALSE}
+#Show ridgeline charts and price/points scatterplot together
+ggarrange(g1, g2, 
+          ncol = 1, nrow = 3)
+```
+
+```{r, out.width = "100%"}
+ggplot(subset(df, price <= 40),
+       aes(x = price, y = points, colour = type)) +
+  geom_point(alpha = 0.3,  position = position_jitter()) + 
+  stat_smooth(method = "lm", size =2) +
+  labs(title = 'Price/Point Comparison for Wines $40 and Under') +
+  scale_color_brewer(palette="Dark2")
+```
+
+
+## Price and Points Correlation
+
+```{r}
+# Correlation to points based on price
+cor.test(recommenderdf$points, recommenderdf$price, method=c("pearson"))
+```
+
+As we can see, there is a pretty solid relationship between points given and price. We can also note that many of the wines in this dataset fall between $15-20. Not too shabby!
+
+***
+
+#Around the World
+
+##Average Rating by Country on Map
+
+```{r, out.width = "100%", message=FALSE, warning=FALSE}
+#Using the map world package 
+map.world <- map_data('world')
+
+#Change US country to USA for map.world match
+df$country <- gsub('US', 'USA', df$country)
+
+#Create dfworld dataframe, group by country, show total reviews and average rating
+dfworld <- df %>% 
+ group_by(country) %>%
+ summarise(AverageRating = mean(points), Total = n()) %>% 
+ arrange(desc(Total)) %>% 
+ ungroup()
+
+#Join dfworld and map.world
+dfworld <- left_join(map.world, dfworld, by = c('region' = 'country'))
+
+#Plot average rating by country on world map
+p2 <- ggplot(data = dfworld, aes(x = long, y = lat, group = group, text=region)) +
+  geom_polygon(aes(fill = AverageRating)) + 
+  scale_fill_viridis(option = 'plasma') + 
+  labs(title = "Average Rating by Country") + 
+  theme_economist()
+
+p2 <- ggplotly(p2)
+
+p2
+```
+
+```{r}
+#Keep only region, avg rating and total reviews columns for table
+dfworldsim <- dfworld[,-c(1:4, 6)]
+
+#Remove duplicate values and NAs
+dfworldsim <- dfworldsim[!(duplicated(dfworldsim$region)), ]
+dfworldsim <- dfworldsim[!is.na(dfworldsim$AverageRating),]
+
+#Top countries by average rating
+head(dfworldsim[order(-dfworldsim[,3],-dfworldsim[,2]),], n = 15)
+```
+
+From the map and table above we can see that there are some surprising countries at the top due to there being only a few highly reviewed wines. Let's re-sort this table so that we take into consideration average score AND the number of reviews.
+
+```{r}
+##Give priority to number of total number of reviews then by rating to get a better idea of top wine countries.
+
+head(dfworldsim[order(-dfworldsim[,3],-dfworldsim[,2]),], n =15)
+```
+
+Much better! The usual suspects are now at the top of the list.
+
+##Top Average Rating by Country for Red Wines
+
+```{r, out.width = "100%", echo=FALSE, message=FALSE, warning=FALSE}
+#Top Average Rating by Country for Red Wines
+dfworldred <- df %>% 
+  filter(df$type == 'Red') %>% 
+ group_by(country) %>%
+ summarise(AverageRating = mean(points), Total = n()) %>% 
+ arrange(desc(Total)) %>% 
+ ungroup()
+
+dfworldred <- left_join(map.world, dfworldred, by = c('region' = 'country'))
+
+p3 <- ggplot(data = dfworldred, aes(x = long, y = lat, group = group, text=region)) +
+  geom_polygon(aes(fill = AverageRating)) + 
+  scale_fill_viridis(option = 'plasma') + 
+  labs(title = "Average Rating for Red Wines by Country") + 
+  theme_economist()
+
+p3 <- ggplotly(p3)
+
+p3
+```
+
+Once again we have a bit of a misleading world map because of the difference in reviews. Let's look at a table that sorts countries by the number of reviews and average score like we did previously.
+
+```{r echo=FALSE}
+#Keep only region, avg rating and total reviews columns for table
+dfworldred <- dfworldred[,-c(1:4, 6)]
+
+#Remove duplicate values and NAs
+dfworldred <- dfworldred[!(duplicated(dfworldred$region)), ]
+dfworldred <- dfworldred[!is.na(dfworldred$AverageRating),]
+
+#Top countries by total reviews, average rating
+head(dfworldred[order(-dfworldred[,3],-dfworldred[,2]),], n = 15)
+```
+
+##Top Average Rating by Country for White Wines
+
+```{r, out.width = "100%", echo=FALSE, message=FALSE, warning=FALSE}
+#Top Average Rating by Country for White Wines
+dfworldwhite <- df %>% 
+  filter(df$type == 'White') %>% 
+ group_by(country) %>%
+ summarise(AverageRating = mean(points), Total = n()) %>% 
+ arrange(desc(Total)) %>% 
+ ungroup()
+
+dfworldwhite <- left_join(map.world, dfworldwhite, by = c('region' = 'country'))
+
+p4 <- ggplot(data = dfworldwhite, aes(x = long, y = lat, group = group, text=region)) +
+  geom_polygon(aes(fill = AverageRating)) + 
+  scale_fill_viridis(option = 'plasma') + 
+  labs(title = "Average Rating for White Wines by Country") + 
+  theme_economist()
+
+p4 <- ggplotly(p4)
+
+p4
+```
+
+Same table for whites, taking into account the number of reviews.
+
+```{r echo=FALSE}
+#Keep only region, avg rating and total reviews columns for table
+dfworldwhite <- dfworldwhite[,-c(1:4, 6)]
+
+#Remove duplicate values and NAs
+dfworldwhite <- dfworldwhite[!(duplicated(dfworldwhite$region)), ]
+dfworldwhite <- dfworldwhite[!is.na(dfworldwhite$AverageRating),]
+
+#Top countries by total reviews, average rating
+head(dfworldwhite[order(-dfworldwhite[,3],-dfworldwhite[,2]),], n = 15)
+```
+
+The sheer number of reviews of US wines puts it at the top of the lists every time despite France and/or Italy having better average scores. These three countries likely round out the top three but hard to say what order!
+
+## Number of Reviews by Winery
+
+```{r}
+#Number of reviews by winery
+reviews_by_winery <- df %>% 
+ group_by(country,winery) %>%
+ summarise(wineryCount = n(), avgScore = mean(points)) %>% 
+ arrange(desc(wineryCount)) %>% 
+ ungroup()
+
+knitr::kable(
+  head(reviews_by_winery)
+)
+```
+
+Above are the top 6 reviewed wineries and their respective average scores. That's a LOT of reviews for a single winery considering we only have two months of data.
+
+##Number of Wineries by Country
+
+```{r}
+#Number of wineries by country
+wineries_by_country <- reviews_by_winery %>% 
+ group_by(country) %>%
+ summarise(totalWineries = n()) %>% 
+ arrange(desc(totalWineries)) %>% 
+ ungroup()
+
+datatable(wineries_by_country, caption = 'Total Wineries by Country', filter = 'top', style = 'bootstrap')
+```
+
+It should be noted again here that these numbers are likely lower than the actual total number of wineries in the world given that we are working with a two month snippet.
+
+##Most Popular Grape Varieties by Country
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+#Popular Grape Varieties by Country
+count_varieties <- df %>% 
+ group_by(country,variety) %>%
+ summarise(Total = n()) %>% 
+ arrange(desc(Total)) %>%
+ top_n(10) %>%
+ ungroup()
+
+count_varieties <- count_varieties %>%
+  arrange(desc(country))
+
+datatable(count_varieties, caption = 'Count of Top 10 Varieties by Country', filter = 'top', style = 'bootstrap')
+```
+
+##Favorite Grape Varieties Based on Points
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+#Favorite grape varieties assumed by points
+fav_varieties <- df %>% 
+ group_by(variety) %>%
+ summarise(avgScore = mean(points), totalReviews = n()) %>% 
+ arrange(desc(totalReviews, avgScore)) %>% 
+ ungroup()
+
+datatable(fav_varieties, caption = 'Top Varieties by Total Reviews/Average Score', filter = 'top', style = 'bootstrap') 
+```
+
+#Model Time
+
+Using a [tutorial of how to create a simple GBM using H2O.ai](https://www.slideshare.net/0xdata/nlp-with-h2o) we are going to figure out how well we can predict the province a wine comes from based on its description alone. I'm going to focus on Sauvignon Blanc wines, since it's a more popular wine and has just under 6,800 reviews we can use to create this model from.
+
+```{r message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+library(h2o)
+h2o.init()
+h2o.no_progress()  # Turn off progress bars for notebook readability
+
+#Create subset for modelling - using sauvignon blanc
+
+h2odf <- df[df$variety=="sauvignon blanc",]
+h2odf <- subset(h2odf, select=c(desc, region_1, country, province))
+```
+
+```{r}
+#Take a look at unique values for each column to see how many countries, provinces, regions produce sauvignon blancs
+sapply(h2odf, function(x) length(unique(x)))
+```
+
+### Provinces Who Make Sauvignon Blanc Wine
+```{r}
+#Look at province breakdown in particular
+province_counts <- count(h2odf, province)
+province_counts$percent <- (province_counts$n / sum(province_counts$n)) * 100
+province_counts <- province_counts[ order(-province_counts$n), ]
+
+datatable(fav_varieties, caption = 'Provinces Who Make Sauvignon Blanc Wine', filter = 'top', style = 'bootstrap') 
+```
+
+Let's make a model!
+
+```{r}
+#Convert categorical columns to factors
+h2odf$region_1 <- as.factor(h2odf$region_1)
+h2odf$country <- as.factor(h2odf$country)
+h2odf$province <- as.factor(h2odf$province)
+
+#Make h2o df
+h2odf <- as.h2o(h2odf, destination_frame = "h2odf")
+
+#Make sure data types are enum and string for locations info and desc respectively
+h2o.getTypes(h2odf)
+```
+
+```{r}
+#Predictor function where desc is input
+predict <- function(desc, w2v, gbm) {
+    words <- as.character(as.h2o(desc))
+    description.vec <- h2o.transform(w2v, words, aggregate_method = "AVERAGE")
+    h2o.predict(gbm, description.vec)
+}
+```
+
+```{r}
+#Break job titles into sequence of words
+words <- h2o.tokenize(h2odf$desc, "\\\\W+")
+```
+
+```{r}
+#Build word2vec model
+w2v.model <- h2o.word2vec(words, sent_sample_rate = 0, epochs = 10)
+```
+
+```{r}
+#Sanity check - find synonyms for the word 'fresh'
+h2o.findSynonyms(w2v.model, "fresh", count = 5)
+```
+
+```{r}
+#Calculate a vector for each desc
+desc.vecs <- h2o.transform(w2v.model, words, aggregate_method = "AVERAGE")
+```
+
+```{r}
+#Prepare test train data and split
+valid.desc <- ! is.na(desc.vecs$C1)
+data <- h2o.cbind(h2odf[valid.desc, "province"], desc.vecs[valid.desc, ])
+data.split <- h2o.splitFrame(data, ratios = 0.8)
+train <- data.split[[1]]
+test <- data.split[[2]]
+```
+
+```{r}
+#Build a basic GBM model
+gbm.model <- h2o.gbm(x = names(desc.vecs), 
+                     y = "province",
+                     training_frame = train, 
+                     validation_frame = test,
+                     seed = 1234)
+```
+
+## Prediction Time
+
+Using a review of a sauvignon blanc from the Marlborough province, let's see whether the model can correctly predict the location. 
+
+```{r}
+#Predict!
+#Description is from a winery in the Marlborough province
+example <- predict("classic gooseberry pink grapefruit notes feature gentle herbal nuances nose theres ample weight texture palate burst mouthwatering citrus finish", w2v.model, gbm.model)
+
+example <- as.data.frame(example)
+
+example <- data.frame(r1=names(example), t(example))
+
+#Delete first row and second column
+example = example[-1,]
+
+head(example[order(example$t.example., decreasing = TRUE), ])
+```
+
+As you can see the model didn't correctly predict Marlborough as the correct location, but it did come in second.
+
+###Hit Ratio - Model Performance
+
+> Hit Ratio is the number of times that a correct prediciton was made in ratio to the number of total prediction names. For example if 20 predidtions were made correctly out of 35 predictions, the hit ratio is 20:35 or .57. 'k' is a positive integer indicating the maximum number of labels to use for hit ratio computation. It cannot be larger than the size of the response domain.
+
+- [H2O.ai - Score: Hit Ratio](http://h2o-release.s3.amazonaws.com/h2o/rel-lambert/5/docs-website/userguide/scorehitratio.html)
+
+```{r}
+#Hit Ratio with Training Data
+h2o.hit_ratio_table(gbm.model, train = TRUE)
+```
+
+```{r}
+#Hit Ratio with Validation Data
+h2o.hit_ratio_table(gbm.model, valid = TRUE)
+```
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+###Shutdown H2O    
+h2o.shutdown(prompt=FALSE)
+```
+
+## Ways to Improve the Mode's Performance
+- Subset by Taster Name: I'm going to guess that tasters will use a certain subset of words to describe wines from different countries, regions etc. If those same words are used on a consistent basis, I believe we could get a better performance in determining where a wine comes from based on the review. On the other hand, if a tasters vocabulary is fairly limited, or only review wines from certain regions, it could end up hurting the model due to a lack of any definitive terms for any one wine/region/country.
+
+- Use TF-IDF: Found an example of how you could do this using an [H2o.ai h2o-meetups notebook if anyone is interested. THe example is in Python though but looks pretty straightforward](https://github.com/h2oai/h2o-meetups/blob/master/2016_10_06_TrumpTweets_Meetup/python-nlp/Python-TF-IDF.ipynb). I think this could improve the model by a fair amount when we take relevance into account.
+
+***
+
+#In Closing
+I hope you enjoyed my dive into this dataset. Any comments and feedback are welcome. Using this kind of data on a large scale would be a fantastic resource for wine lovers and producers alike to peruse through varieties, countries, and perhaps even aid in the creation of a recommendation engine based on keywords. All in all a very fun exploration for me. Thanks for reading.
+
+#Resources
+- [Grape Varietals Wikipedia Page](https://en.wikipedia.org/wiki/List_of_grape_varieties). 
+- [Github user rocheio's wiki-table-scrape code](https://github.com/rocheio/wiki-table-scrape)
+- [Wine Folly's Flavor Chart](https://winefolly.com/tutorial/introducing-the-wine-flavor-chart/)
+- [Kaggle - NLP in R Topic Modelling by Rachael Tatman](https://www.kaggle.com/rtatman/nlp-in-r-topic-modelling)
+- [H2O and NLP](https://www.slideshare.net/0xdata/nlp-with-h2o)
+- [H2O.ai - Score: Hit Ratio](http://h2o-release.s3.amazonaws.com/h2o/rel-lambert/5/docs-website/userguide/scorehitratio.html)
+
