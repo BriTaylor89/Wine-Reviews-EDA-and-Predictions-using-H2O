@@ -15,4 +15,4 @@ I used RStudio to create this report. All libraries used are mentioned in the re
 
 ## License
 
-This project is licensed under the MIT License - see [https://creativecommons.org/licenses/by-nc-sa/4.0/](CC BY-NC-SA 4.0) for details
+This project is licensed under the MIT License - see [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) for details
