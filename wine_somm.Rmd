@@ -1,11 +1,12 @@
 ---
 title: "Wine EDA and Prediction of Provinces Using Wine Descriptions"
+
+always_allow_html: yes
+
 output:
-  html_document:
-    number_sections: TRUE
-    toc: TRUE
-    editor_options: 
-      chunk_output_type: console
+    md_document:
+      variant: markdown_github
+      toc: TRUE
 ---
 
 #Introduction
@@ -52,8 +53,6 @@ Let's start! I've decided to use both csv files for this kernel so I'm merging t
 
 ```{r create df, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
 #Create dataframe
-setwd("C:/Users/Brianna Taylor/Documents/Data Science/Projects/Wine Sommelier Kaggle Project 2018/wine_data/csv")
-
 df <- list.files(pattern="*.csv") %>% 
   lapply(read_csv) %>%
   bind_rows
@@ -213,7 +212,7 @@ knitr::kable(head(variety_counts[ order(-variety_counts$n), ]))
 
 ### Flavor Profiles and Complexity
 
-You'll often hear that wine has 'notes'. I thought it would be worth digging into and representing flavor profiles of wines. Using [Wine Folly's Flavor Chart](https://winefolly.com/tutorial/introducing-the-wine-flavor-chart/) I have done something similar to what I did when creating the 'type' column, and grouped words that fall into a flavor category together. I've left out some categories such as 'noble rot' because I'm assuming many people aren't familiar with the taste and/or smell of cat pee or beeswax. Flavor categories could be made far more complex and complete, but since I'm not sure what else should be added to categories like 'earthy' or 'microbial' I've decided to keep things simple. Below you will find a filterable table that shows you not only the profiles a wine has, but a count of how many profiles a wine falls under, which I've titled flavor complexity. 
+You'll often hear that wine has 'notes'. I thought it would be worth digging into and representing flavor profiles of wines. Using [Wine Folly's Flavor Chart](https://winefolly.com/tutorial/introducing-the-wine-flavor-chart/) I have done something similar to what I did when creating the 'type' column, and grouped words that fall into a flavor category together. I've left out some categories such as 'noble rot' because I'm assuming many people aren't familiar with the taste and/or smell of cat pee or beeswax. Flavor categories could be made far more complex and complete, but since I'm not sure what else should be added to categories like 'earthy' or 'microbial' I've decided to keep things simple. Below you will find a snippet table that shows you not only the profiles a wine has, but a count of how many profiles a wine falls under, which I've titled flavor complexity. If you want to see the complete table in filterable form, uncomment and run the data.table code block.
 
 ```{r message=FALSE, warning=FALSE, paged.print=FALSE}
 #Create a new df to focus on flavor profiles of wine based on words in the desc
@@ -268,8 +267,11 @@ recommenderdf$oak <- NULL
 recommenderdf$aged <- NULL
 recommenderdf$microbial <- NULL
 
-#Datatable showing flavor profile and complexity of wines
-datatable(subset(recommenderdf[c(1:3,5:8,10:12)]), caption = 'Flavor Profiles and Complexity (count of flavor profiles) in Wines', filter = 'top', style = 'bootstrap')
+#Datatable showing flavor profile and complexity of wines - run locally. very large!
+#datatable(subset(recommenderdf[c(1:3,5:8,10:12)]), caption = 'Flavor Profiles and Complexity (count of flavor profiles) in Wines', filter = 'top', style = 'bootstrap')
+
+#taster
+head(recommenderdf, 25)
 ```
 
 ### Correlation Between Points and Flavor Complexity
@@ -432,7 +434,7 @@ reviews_tfidf  %>%
 
 ### TF-IDF Filterable Table for White Wines
 
-I wanted to create tables throughtout this project that were searchable so that people who were interested in seeing what characteristics a variety is likely to have based on terms could do so. I've created a table with all the white wine varieties below.
+I wanted to create tables throughtout this project that were searchable so that people who were interested in seeing what characteristics a variety is likely to have based on terms could do so. I've created a table with all the white wine varieties below. Again, creating a filterable table showing top terms for all varieties is quite large, so uncomment and run the data.table if you want to do some exploring!
 
 ```{r message=FALSE, warning=FALSE, paged.print=FALSE}
 #Create subset df for white wines 
@@ -445,8 +447,11 @@ whites_tfidf <- top_terms_by_topic_tfidf(text_df = subset(df, type == "White"),
 whites_tfidf <- whites_tfidf %>%
   arrange(variety, n)
 
-#Create filterable table showing top tf-idf term for each variety 
-datatable(whites_tfidf, caption = 'Descriptors of White Wines with Word Count and tf-idf Importance', filter = 'top', style = 'bootstrap')
+#Create filterable table showing top tf-idf term for each variety  - run locally. very large!
+#datatable(whites_tfidf, caption = 'Descriptors of White Wines with Word Count and tf-idf Importance', filter = 'top', style = 'bootstrap')
+
+#taster
+head(whites_tfidf, 25)
 ```
 
 ###Top 3 Most Important Terms by State and Wine Type in the US
@@ -765,7 +770,7 @@ g2 <- ggplot(subset(df, price <= 40), aes(x = price, y = type, fill = ..x..)) +
 ```{r, out.width = "100%", message=FALSE, warning=FALSE, paged.print=FALSE}
 #Show ridgeline charts and price/points scatterplot together
 ggarrange(g1, g2, 
-          ncol = 1, nrow = 3)
+          ncol = 1, nrow = 2)
 ```
 
 ```{r, out.width = "100%"}
@@ -1084,6 +1089,8 @@ Using a review of a sauvignon blanc from the Marlborough province, let's see whe
 #Description is from a winery in the Marlborough province
 example <- predict("classic gooseberry pink grapefruit notes feature gentle herbal nuances nose theres ample weight texture palate burst mouthwatering citrus finish", w2v.model, gbm.model)
 
+example
+
 example <- as.data.frame(example)
 
 example <- data.frame(r1=names(example), t(example))
@@ -1092,9 +1099,14 @@ example <- data.frame(r1=names(example), t(example))
 example = example[-1,]
 
 head(example[order(example$t.example., decreasing = TRUE), ])
+
+#figure out how to show only these three
+example %>%
+  filter(r1 %in% c("Loire.Valley", "Washington", "Marlborough")) %>%
+  arrange(desc(t.example.))
 ```
 
-As you can see the model didn't correctly predict Marlborough as the correct location, but it did come in second.
+As you can see the model didn't correctly predict Marlborough as the correct location, but it did come in third.
 
 ###Hit Ratio - Model Performance
 
@@ -1110,11 +1122,6 @@ h2o.hit_ratio_table(gbm.model, train = TRUE)
 ```{r}
 #Hit Ratio with Validation Data
 h2o.hit_ratio_table(gbm.model, valid = TRUE)
-```
-
-```{r message=FALSE, warning=FALSE, paged.print=FALSE}
-###Shutdown H2O    
-h2o.shutdown(prompt=FALSE)
 ```
 
 ## Ways to Improve the Mode's Performance
